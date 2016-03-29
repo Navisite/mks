@@ -14,14 +14,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import urlparse
-import websockify
-import socket
-import ssl
 import base64
 import hashlib
+import logging
 import os
 import random
+import socket
+import ssl
+import urlparse
+import websockify
 
 VMAD_OK = 200
 VMAD_WELCOME = 220

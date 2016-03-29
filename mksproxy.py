@@ -40,7 +40,8 @@ def run_websockets_proxy(args):
         file_only=True,
         daemon=args.daemon,
         heartbeat=args.heartbeat,
-        RequestHandlerClass=authd.AuthdRequestHandler)
+        RequestHandlerClass=authd.AuthdRequestHandler,
+        cert=args.cert)
     proxy.record = args.record
     proxy.start_server()
 
@@ -57,6 +58,8 @@ if __name__ == '__main__':
                         help="Run proxy server as a daemon")
     parser.add_argument("-r", "--record", type=str, default=None,
                         help="Data record file")
+    parser.add_argument("-c", "--cert", type=str, default="",
+                        help="SSL certificate")
     args = parser.parse_args()
     stdout_logging()
     run_websockets_proxy(args)
