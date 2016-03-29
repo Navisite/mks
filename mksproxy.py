@@ -16,23 +16,47 @@
 
 import argparse
 import authd
+import logging
+import sys
 import websockify
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-host", help="MKS proxy host (default 'localhost')",
-                        default='localhost')
-    parser.add_argument("-port", help="MKS proxy port (default 6090)",
-                        type=int, default=6090)
-    parser.add_argument("--web", help="web location")
-    args = parser.parse_args()
+def stdout_logging():
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setLevel(logging.DEBUG)
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    ch.setFormatter(formatter)
+    root.addHandler(ch)
 
-    print('Starting MKS proxy on {0}:{1}'.format(args.host, args.port))
-    websockify.WebSocketProxy(
+def run_websockets_proxy(args):
+    logging.debug('Starting MKS proxy on {0}:{1}'.format(args.host, args.port))
+    proxy = websockify.WebSocketProxy(
         listen_host=args.host,
         listen_port=args.port,
         verbose=True,
         web=args.web,
         file_only=True,
-        RequestHandlerClass=authd.AuthdRequestHandler
-    ).start_server()
+        daemon=args.daemon,
+        heartbeat=args.heartbeat,
+        RequestHandlerClass=authd.AuthdRequestHandler)
+    proxy.record = args.record
+    proxy.start_server()
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-s", "--host", default='localhost',
+                        help="MKS proxy host (default 'localhost')")
+    parser.add_argument("-p", "--port",  type=int, default=6090,
+                        help="Heartbeat seconds, 0 for off) (default 20)")
+    parser.add_argument("-b", "--heartbeat", type=int, default=20,
+                        help="MKS proxy port (default 6090)")
+    parser.add_argument("--web", help="web location")
+    parser.add_argument("-d", "--daemon", action="store_true",
+                        help="Run proxy server as a daemon")
+    parser.add_argument("-r", "--record", type=str, default=None,
+                        help="Data record file")
+    args = parser.parse_args()
+    stdout_logging()
+    run_websockets_proxy(args)

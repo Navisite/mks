@@ -1,3 +1,4 @@
+#!/usr/bin/python
 # Copyright (c) 2015 Radoslav Gerganov
 # All Rights Reserved.
 #
@@ -73,6 +74,30 @@ def handshake(host, port, ticket, cfg_file, thumbprint):
 
 class AuthdRequestHandler(websockify.ProxyRequestHandler):
 
+    def _handle_esx_init(self, tsock):
+        """
+        We need to handle some negotiation with
+        noVNC since ESX doesn't
+        """
+        version = "RFB 003.008"
+        logging.debug("Sending version %s" % version)
+        self.send_frames([version+"\n",])
+        agreed_version, closed = self.recv_frames()
+        agreed_version = agreed_version[0].split()[0]
+        logging.debug("Received version %s" % agreed_version)
+        logging.debug("Sending security types")
+        self.send_frames(["\x01\x01"])
+        agreed_security_type, closed =  self.recv_frames()
+        logging.debug("Agreed security type is %s" %
+                      agreed_security_type[0].split()[0])
+        logging.debug("Sending OK security result")
+        self.send_frames(["\x00\x00\00\x00"])
+        shared_flag, closed = self.recv_frames()
+        logging.debug("Received shared flag %s" % shared_flag[0].split()[0])
+        logging.debug("Sending VM info")
+        self.send_frames(tsock.recv(1024))
+        logging.debug("init handling finished")
+
     def new_websocket_client(self):
         parse = urlparse.urlparse(self.path)
         query = parse.query
@@ -86,4 +111,5 @@ class AuthdRequestHandler(websockify.ProxyRequestHandler):
         thumbprint = thumbprint.replace(':', '').lower()
 
         tsock = handshake(host, port, ticket, cfg_file, thumbprint)
+        self._handle_esx_init(tsock)
         self.do_proxy(tsock)
