@@ -81,23 +81,23 @@ class AuthdRequestHandler(websockify.ProxyRequestHandler):
         noVNC since ESX doesn't
         """
         version = "RFB 003.008"
-        logging.debug("Sending version %s" % version)
+        self.log_message("Sending version %s", version)
         self.send_frames([version+"\n",])
         agreed_version, closed = self.recv_frames()
         agreed_version = agreed_version[0].split()[0]
-        logging.debug("Received version %s" % agreed_version)
-        logging.debug("Sending security types")
+        self.log_message("Received version %s", agreed_version)
+        self.log_message("Sending security types")
         self.send_frames(["\x01\x01"])
         agreed_security_type, closed =  self.recv_frames()
-        logging.debug("Agreed security type is %s" %
+        self.log_message("Agreed security type is %s",
                       agreed_security_type[0].split()[0])
-        logging.debug("Sending OK security result")
+        self.log_message("Sending OK security result")
         self.send_frames(["\x00\x00\00\x00"])
         shared_flag, closed = self.recv_frames()
-        logging.debug("Received shared flag %s" % shared_flag[0].split()[0])
-        logging.debug("Sending VM info")
+        self.log_message("Received shared flag %s", shared_flag[0].split()[0])
+        self.log_message("Sending VM info")
         self.send_frames(tsock.recv(1024))
-        logging.debug("init handling finished")
+        self.log_message("init handling finished")
 
     def new_websocket_client(self):
         parse = urlparse.urlparse(self.path)
