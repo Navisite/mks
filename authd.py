@@ -75,29 +75,31 @@ def handshake(host, port, ticket, cfg_file, thumbprint):
 
 class AuthdRequestHandler(websockify.ProxyRequestHandler):
 
-    def _handle_esx_init(self, tsock):
+    def _handle_esx_init(self, tsock, ticket):
         """
         We need to handle some negotiation with
         noVNC since ESX doesn't
         """
+        def log(msg, *args):
+            self.log_message("(ticket %s) " + msg, *[ticket]+list(args))
         version = "RFB 003.008"
-        self.log_message("Sending version %s", version)
+        log("Sending version %s", version)
         self.send_frames([version+"\n",])
         agreed_version, closed = self.recv_frames()
         agreed_version = agreed_version[0].split()[0]
-        self.log_message("Received version %s", agreed_version)
-        self.log_message("Sending security types")
+        log("Received version %s", agreed_version)
+        log("Sending security types")
         self.send_frames(["\x01\x01"])
         agreed_security_type, closed =  self.recv_frames()
-        self.log_message("Agreed security type is %s",
+        log("Agreed security type is %s",
                       agreed_security_type[0].split()[0])
-        self.log_message("Sending OK security result")
+        log("Sending OK security result")
         self.send_frames(["\x00\x00\00\x00"])
         shared_flag, closed = self.recv_frames()
-        self.log_message("Received shared flag %s", shared_flag[0].split()[0])
-        self.log_message("Sending VM info")
+        log("Received shared flag %s", shared_flag[0].split()[0])
+        log("Sending VM info")
         self.send_frames(tsock.recv(1024))
-        self.log_message("init handling finished")
+        log("init handling finished")
 
     def new_websocket_client(self):
         parse = urlparse.urlparse(self.path)
@@ -112,5 +114,5 @@ class AuthdRequestHandler(websockify.ProxyRequestHandler):
         thumbprint = thumbprint.replace(':', '').lower()
 
         tsock = handshake(host, port, ticket, cfg_file, thumbprint)
-        self._handle_esx_init(tsock)
+        self._handle_esx_init(tsock, ticket)
         self.do_proxy(tsock)
