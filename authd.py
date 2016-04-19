@@ -86,17 +86,16 @@ class AuthdRequestHandler(websockify.ProxyRequestHandler):
         log("Sending version %s", version)
         self.send_frames([version+"\n",])
         agreed_version, closed = self.recv_frames()
-        agreed_version = agreed_version[0].split()[0]
+        agreed_version = agreed_version[0]
         log("Received version %s", agreed_version)
         log("Sending security types")
         self.send_frames(["\x01\x01"])
         agreed_security_type, closed =  self.recv_frames()
-        log("Agreed security type is %s",
-                      agreed_security_type[0].split()[0])
+        log("Agreed security type is %s", agreed_security_type[0])
         log("Sending OK security result")
         self.send_frames(["\x00\x00\00\x00"])
         shared_flag, closed = self.recv_frames()
-        log("Received shared flag %s", shared_flag[0].split()[0])
+        log("Received shared flag %s", shared_flag[0])
         log("Sending VM info")
         self.send_frames(tsock.recv(1024))
         log("init handling finished")
