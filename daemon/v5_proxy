@@ -1,0 +1,31 @@
+#!/bin/sh
+#
+
+PATH=/bin:/usr/bin:/sbin:/usr/sbin
+
+USER=rnd
+DAEMON=/usr/bin/daemon
+
+case "$1" in
+  start)
+        echo -n "Starting 5.x host proxy process: \n"
+        $DAEMON -n v5_proxy      -u $USER
+        echo "done."
+        ;;
+  stop)
+        echo -n "Stopping 5.x host proxy processes: \n"
+        $DAEMON -n v5_proxy      -u $USER --stop
+        echo "done."
+        ;;
+  force-reload|restart)
+        echo -n "Restarting 5.x host proxy processes: \n"
+        $DAEMON -n v5_proxy      -u $USER --restart
+        echo "done."
+        ;;
+  *)
+        echo "Usage: /etc/init.d/v5_proxy {start|stop|restart}"
+        exit 1
+esac
+
+exit 0 
+

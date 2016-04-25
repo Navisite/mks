@@ -42,7 +42,8 @@ def run_websockets_proxy(args):
         daemon=args.daemon,
         heartbeat=args.heartbeat,
         RequestHandlerClass=authd.AuthdRequestHandler,
-        cert=args.cert)
+        cert=args.cert,
+        key=args.key)
     proxy.record = args.record
     proxy.start_server()
 
@@ -61,6 +62,8 @@ if __name__ == '__main__':
                         help="Data record file")
     parser.add_argument("-c", "--cert", type=str, default="",
                         help="SSL certificate")
+    parser.add_argument("-k", "--key", type=str, default="",
+                        help="SSL key")
     args = parser.parse_args()
     stdout_logging()
     run_websockets_proxy(args)
