@@ -1,3 +1,9 @@
+"""
+Websocket proxy server
+
+Copyright 2016 NaviSite Inc - A Time Warner Cable Company
+"""
+
 import websockify
 import urlparse
 import time
@@ -5,6 +11,7 @@ import select
 import sys
 import errno
 import six
+import socket
 
 class SimpleProxyHandler(websockify.ProxyRequestHandler):
     """
@@ -12,6 +19,13 @@ class SimpleProxyHandler(websockify.ProxyRequestHandler):
     """
 
     def _recv_line(self, sock):
+        """
+        Receive from the socket on char at a time
+        until we get to a new line
+
+        Args:
+          sock: The socket to receive from
+        """
         line = []
         while True:
             character = sock.recv(1)
@@ -21,6 +35,12 @@ class SimpleProxyHandler(websockify.ProxyRequestHandler):
         return six.b("").join(line)
 
     def _read_headers(self, sock):
+        """
+        Read the headers line by line, we previously send to the target sock
+        
+        Args:
+          sock: The socket we have send headers to
+        """
         status = None
         headers = {}
 
@@ -67,9 +87,19 @@ class SimpleProxyHandler(websockify.ProxyRequestHandler):
         self.do_proxy(tsock)
 
     def do_proxy(self, target):
+        """
+        Handle the reading and writing of data being passed through
+        the proxy
+
+        Args:
+          target: the websockify WebSocketServer socket of the target
+            server
+        """
         cqueue = []
         tqueue = []
         rlist = [self.request, target]
+        self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        target.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
         if self.server.heartbeat:
             now = time.time()
@@ -84,7 +114,7 @@ class SimpleProxyHandler(websockify.ProxyRequestHandler):
                 now = time.time()
                 if now > self.heartbeat:
                     self.heartbeat = now + self.server.heartbeat
-                    self.send_ping()
+                    # self.send_ping()
 
             if tqueue: wlist.append(target)
             if cqueue: wlist.append(self.request)

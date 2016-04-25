@@ -19,6 +19,7 @@ import authd
 import logging
 import sys
 import websockify
+import proxies
 
 def stdout_logging():
     root = logging.getLogger()
@@ -40,7 +41,7 @@ def run_websockets_proxy(args):
         file_only=True,
         daemon=args.daemon,
         heartbeat=args.heartbeat,
-        RequestHandlerClass=authd.AuthdRequestHandler,
+        RequestHandlerClass=proxies.SimpleProxyHandler,
         cert=args.cert)
     proxy.record = args.record
     proxy.start_server()
