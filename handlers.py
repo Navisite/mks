@@ -86,22 +86,58 @@ class ESXi5Handler(websockify.ProxyRequestHandler):
         """
         def log(msg, *args):
             self.log_message("(ticket %s) " + msg, *[ticket]+list(args))
+
+        def check_close(closed):
+            if closed:
+                if self.verbose:
+                    self.log_message("%s:%s: Client closed connection",
+                                     self.server.target_host,
+                                     self.server.target_port)
+                raise self.CClose(closed['code'], closed['reason'])
+
+        #RFB protocol
         version = "RFB 003.008"
         log("Sending version %s", version)
         self.send_frames([version+"\n",])
         agreed_version, closed = self.recv_frames()
+        check_close(closed)
         agreed_version = agreed_version[0]
         log("Received version %s", agreed_version)
-        log("Sending security types")
+        if agreed_version != "RFB 003.008\n":
+            if self.verbose:
+                self.log_message("Client sent unsupported RFB version")
+            raise self.CClose(1000, "Unsupported RFB version")
+
+        #Security types
+        log("Sending security types (None)")
         self.send_frames(["\x01\x01"])
         agreed_security_type, closed =  self.recv_frames()
-        log("Agreed security type is %s", agreed_security_type[0])
+        check_close(closed)
+        agreed_security_type = agreed_security_type[0]
+        log("Client security type is %s", agreed_security_type.encode('hex'))
+        if agreed_security_type != b'\x01':
+            if self.verbose:
+                self.log_message("Client did not accept None security type")
+            raise self.CClose(1000, "Server supports only None security type")
+
+        #Security OK
         log("Sending OK security result")
         self.send_frames(["\x00\x00\00\x00"])
         shared_flag, closed = self.recv_frames()
-        log("Received shared flag %s", shared_flag[0])
+        check_close(closed)
+        shared_flag = shared_flag[0]
+        log("Received shared flag %s", shared_flag.encode('hex'))
+        check_close(closed)
+        if shared_flag != b'\x01':
+            if self.verbose:
+                self.log_message("Client requested close other sessions. Which"
+                                 "is not supported")
+            raise self.CClose(1000, "Server supports only keeping connections")
+
+        #Read and pass along the screen details
         log("Sending VM info")
         self.send_frames(tsock.recv(1024))
+
         log("init handling finished")
 
     def new_websocket_client(self):
@@ -273,7 +309,7 @@ class ESXi6Handler(websockify.ProxyRequestHandler):
                         self.log_message("%s:%s: Client closed connection",
                                          self.server.target_host,
                                          self.server.target_port)
-                    raise self.CClose(1000, "Target closed")
+                    raise self.CClose(1000, "Client closed")
 
                 else:
                     #Don't forward pong packets
