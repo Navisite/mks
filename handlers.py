@@ -13,6 +13,10 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
+"""
+Handlers for ESXi hosts to handle handshakes
+  and make dynamic connections based on request params
+"""
 
 import base64
 import errno
