@@ -1,26 +1,136 @@
-"""
-Websocket proxy server
+#!/usr/bin/python
+# Copyright (c) 2015 Radoslav Gerganov
+# All Rights Reserved.
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
 
-Copyright 2016 NaviSite Inc - A Time Warner Cable Company
-"""
-
-import websockify
-import urlparse
-import time
-import select
-import sys
+import base64
 import errno
+import hashlib
+import logging
+import os
+import random
+import select
 import six
 import socket
+import ssl
+import sys
+import time
+import urlparse
+import websockify
 
-class SimpleProxyHandler(websockify.ProxyRequestHandler):
+VMAD_OK = 200
+VMAD_WELCOME = 220
+VMAD_LOGINOK = 230
+VMAD_NEEDPASSWD = 331
+VMAD_USER_CMD = "USER"
+VMAD_PASS_CMD = "PASS"
+VMAD_THUMB_CMD = "THUMBPRINT"
+VMAD_CONNECT_CMD = "CONNECT"
+
+def expect(sock, code):
+    line = sock.recv(1024)
+    recv_code, msg = line.split()[0:2]
+    if code != int(recv_code):
+        raise Exception('Expected %d but received %d' % (code, recv_code))
+    return msg
+
+
+def handshake(host, port, ticket, cfg_file, thumbprint):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.connect((host, port))
+    expect(sock, VMAD_WELCOME)
+    sock = ssl.wrap_socket(sock)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    cert = sock.getpeercert(binary_form=True)
+    h = hashlib.sha1()
+    h.update(cert)
+    if thumbprint != h.hexdigest():
+        raise Exception("Server thumbprint doesn't match")
+    sock.write("%s %s\r\n" % (VMAD_USER_CMD, ticket))
+    expect(sock, VMAD_NEEDPASSWD)
+    sock.write("%s %s\r\n" % (VMAD_PASS_CMD, ticket))
+    expect(sock, VMAD_LOGINOK)
+    rand = os.urandom(12)
+    rand = base64.b64encode(rand)
+    sock.write("%s %s\r\n" % (VMAD_THUMB_CMD, rand))
+    thumbprint2 = expect(sock, VMAD_OK)
+    thumbprint2 = thumbprint2.replace(':', '').lower()
+    sock.write("%s %s mks\r\n" % (VMAD_CONNECT_CMD, cfg_file))
+    expect(sock, VMAD_OK)
+    sock2 = ssl.wrap_socket(sock)
+    cert2 = sock2.getpeercert(binary_form=True)
+    h = hashlib.sha1()
+    h.update(cert2)
+    if thumbprint2 != h.hexdigest():
+        raise Exception("Second thumbprint doesn't match")
+    sock2.write(rand)
+    return sock2
+
+class ESXi5Handler(websockify.ProxyRequestHandler):
+
+    def _handle_esx_init(self, tsock, ticket):
+        """
+        We need to handle some negotiation with
+        noVNC since ESX doesn't
+        """
+        def log(msg, *args):
+            self.log_message("(ticket %s) " + msg, *[ticket]+list(args))
+        version = "RFB 003.008"
+        log("Sending version %s", version)
+        self.send_frames([version+"\n",])
+        agreed_version, closed = self.recv_frames()
+        agreed_version = agreed_version[0]
+        log("Received version %s", agreed_version)
+        log("Sending security types")
+        self.send_frames(["\x01\x01"])
+        agreed_security_type, closed =  self.recv_frames()
+        log("Agreed security type is %s", agreed_security_type[0])
+        log("Sending OK security result")
+        self.send_frames(["\x00\x00\00\x00"])
+        shared_flag, closed = self.recv_frames()
+        log("Received shared flag %s", shared_flag[0])
+        log("Sending VM info")
+        self.send_frames(tsock.recv(1024))
+        log("init handling finished")
+
+    def new_websocket_client(self):
+        parse = urlparse.urlparse(self.path)
+        query = parse.query
+        args = urlparse.parse_qs(query)
+        host = args.get("host", [""]).pop()
+        port = args.get("port", [""]).pop()
+        port = int(port)
+        ticket = args.get("ticket", [""]).pop()
+        cfg_file = args.get("cfgFile", [""]).pop()
+        thumbprint = args.get("thumbprint", [""]).pop()
+        thumbprint = thumbprint.replace(':', '').lower()
+
+        tsock = handshake(host, port, ticket, cfg_file, thumbprint)
+        self._handle_esx_init(tsock, ticket)
+        #Disable Nagle's Algorithm
+        self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        tsock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self.do_proxy(tsock)
+
+class ESXi6Handler(websockify.ProxyRequestHandler):
     """
     Simple proxy that expects both sides to support websockets
     """
 
     def _recv_line(self, sock):
         """
-        Receive from the socket on char at a time
+        Receive from the socket one char at a time
         until we get to a new line
 
         Args:
@@ -36,10 +146,10 @@ class SimpleProxyHandler(websockify.ProxyRequestHandler):
 
     def _read_headers(self, sock):
         """
-        Read the headers line by line, we previously send to the target sock
-        
+        Read the headers line by line for the socket
+
         Args:
-          sock: The socket we have send headers to
+          sock: Socket to read headers from
         """
         status = None
         headers = {}
@@ -79,7 +189,7 @@ class SimpleProxyHandler(websockify.ProxyRequestHandler):
             host, port, connect=True, use_ssl=True, unix_socket=False)
         request = "GET /ticket/%s HTTP/1.1\r\n" % ticket
         upgrade = request + str(self.headers) + "\r\n"
-        print upgrade
+        self.log_message("Upgrade headers:\n%s", upgrade)
         tsock.send(upgrade)
         status, headers = self._read_headers(tsock)
         if status != 101:
@@ -98,6 +208,8 @@ class SimpleProxyHandler(websockify.ProxyRequestHandler):
         cqueue = []
         tqueue = []
         rlist = [self.request, target]
+
+        #Disable Nagle's Algorithm for better responsiveness
         self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         target.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
@@ -114,10 +226,18 @@ class SimpleProxyHandler(websockify.ProxyRequestHandler):
                 now = time.time()
                 if now > self.heartbeat:
                     self.heartbeat = now + self.server.heartbeat
+                    #Currently, sending pings using the send_ping
+                    # intertwines the pings with real data, causing
+                    # a client error.
+                    #TODO: Fix pings to make sure they are not
+                    # in data.
                     # self.send_ping()
 
-            if tqueue: wlist.append(target)
-            if cqueue: wlist.append(self.request)
+            if tqueue:
+                wlist.append(target)
+            if cqueue:
+                wlist.append(self.request)
+
             try:
                 ins, outs, excepts = select.select(rlist, wlist, [], 1)
             except (select.error, OSError):
@@ -132,7 +252,8 @@ class SimpleProxyHandler(websockify.ProxyRequestHandler):
                 else:
                     continue
 
-            if excepts: raise Exception("Socket exception")
+            if excepts:
+                raise Exception("Socket exception")
 
             if self.request in outs:
                 # Send queued target data to the client

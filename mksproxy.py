@@ -15,11 +15,10 @@
 #    under the License.
 
 import argparse
-import authd
 import logging
 import sys
 import websockify
-import proxies
+import handlers
 
 def stdout_logging():
     root = logging.getLogger()
@@ -33,6 +32,11 @@ def stdout_logging():
 
 def run_websockets_proxy(args):
     logging.debug('Starting MKS proxy on {0}:{1}'.format(args.host, args.port))
+    if args.esxi == 5:
+        handler = handlers.ESXi5Handler
+    else:
+        handler = handlers.ESXi6Handler
+
     proxy = websockify.WebSocketProxy(
         listen_host=args.host,
         listen_port=args.port,
@@ -41,7 +45,7 @@ def run_websockets_proxy(args):
         file_only=True,
         daemon=args.daemon,
         heartbeat=args.heartbeat,
-        RequestHandlerClass=authd.AuthdRequestHandler,
+        RequestHandlerClass=handler,
         cert=args.cert,
         key=args.key)
     proxy.record = args.record
@@ -52,9 +56,11 @@ if __name__ == '__main__':
     parser.add_argument("-s", "--host", default='localhost',
                         help="MKS proxy host (default 'localhost')")
     parser.add_argument("-p", "--port",  type=int, default=6090,
-                        help="Heartbeat seconds, 0 for off) (default 20)")
-    parser.add_argument("-b", "--heartbeat", type=int, default=20,
                         help="MKS proxy port (default 6090)")
+    parser.add_argument("-e", "--esxi", type=int, required=True, choices=[5, 6],
+                        help="ESXi version of host")
+    parser.add_argument("-b", "--heartbeat", type=int, default=20,
+                        help="Heartbeat seconds, 0 for off) (default 20)")
     parser.add_argument("--web", help="web location")
     parser.add_argument("-d", "--daemon", action="store_true",
                         help="Run proxy server as a daemon")
