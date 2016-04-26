@@ -13,6 +13,10 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
+"""
+Handlers for ESXi hosts to handle handshakes
+  and make dynamic connections based on request params
+"""
 
 import base64
 import errno
@@ -220,7 +224,6 @@ class ESXi6Handler(websockify.ProxyRequestHandler):
         port = 443
         ticket = args.get("ticket", [""]).pop()
 
-        #Consider using the websocket_client code
         tsock = websockify.websocket.WebSocketServer.socket(
             host, port, connect=True, use_ssl=True, unix_socket=False)
         request = "GET /ticket/%s HTTP/1.1\r\n" % ticket
