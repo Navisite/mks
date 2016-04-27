@@ -240,7 +240,7 @@ class ESXi6Handler(websockify.ProxyRequestHandler):
         Receive and decode WebSocket frames.
 
         Returns:
-            (complete_frames, closed_string)
+            (complete_frames, parital_frames, closed_string)
         """
         closed = False
         complete_frames = ''
@@ -321,14 +321,7 @@ class ESXi6Handler(websockify.ProxyRequestHandler):
                 now = time.time()
                 if now > self.heartbeat:
                     self.heartbeat = now + self.server.heartbeat
-                    #Currently, sending pings using the send_ping
-                    # intertwines the pings with real data, causing
-                    # a client error.
-                    #TODO: Fix pings to make sure they are not
-                    # in data.
-                    # self.send_ping()
                     cqueue += self.encode_hybi('', opcode=0x09, base64=False)[0]
-
             wlist = []
             if tqueue:
                 wlist.append(target)
