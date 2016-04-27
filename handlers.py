@@ -235,6 +235,52 @@ class ESXi6Handler(websockify.ProxyRequestHandler):
             raise Exception("Bad Response, %s, %s" % (status, headers))
         self.do_proxy(tsock)
 
+    def recv_target(self, sock):
+        """
+        Receive and decode WebSocket frames.
+
+        Returns:
+            (bufs_list, closed_string)
+        """
+        closed = False
+        complete_frames = ''
+
+        buf = sock.recv(self.buffer_size)
+        if len(buf) == 0:
+            closed = {'code': 1000, 'reason': "Target closed abruptly"}
+            return bufs, closed
+
+        if self.target_partial_frames:
+            # Add partially received frames to current read buffer
+            buf = self.target_partial_frames + buf
+            self.target_partial_frames = None
+
+        while buf:
+            frame = self.decode_hybi(buf, base64=self.base64,
+                                     logger=self.logger,
+                                     strict=self.strict_mode)
+            #self.msg("Received buf: %s, frame: %s", repr(buf), frame)
+
+            if frame['payload'] is None:
+                # Incomplete/partial frame
+                if frame['left'] > 0:
+                    self.target_partial = buf[-frame['left']:]
+                break
+            else:
+                if frame['opcode'] == 0x8: # connection close
+                    closed = {'code': frame['close_code'],
+                              'reason': frame['close_reason']}
+                    break
+
+            if frame['left']:
+                buf = buf[-frame['left']:]
+                complete_frames += buf[:-frame['left']]
+            else:
+                buf = ''
+                complete_frames += buf
+
+        return complete_frames, closed
+
     def do_proxy(self, target):
         """
         Handle the reading and writing of data being passed through
@@ -247,6 +293,8 @@ class ESXi6Handler(websockify.ProxyRequestHandler):
         cqueue = []
         tqueue = []
         rlist = [self.request, target]
+
+        self.target_partial_frames = None
 
         #Disable Nagle's Algorithm for better responsiveness
         self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -334,10 +382,12 @@ class ESXi6Handler(websockify.ProxyRequestHandler):
 
             if target in ins:
                 # Receive target data, encode it and queue for client
-                buf = target.recv(self.buffer_size)
-                if len(buf) == 0:
+                #buf = target.recv(self.buffer_size)
+                buf, closed = self.recv_target(target)
+                if closed:
                     if self.verbose:
                         self.log_message("%s:%s: Target closed connection",
-                                self.server.target_host, self.server.target_port)
-                    raise self.CClose(1000, "Target closed")
+                                         self.server.target_host,
+                                         self.server.target_port)
+                        raise self.CClose(closed['code'], closed['reason'])
                 cqueue.append(buf)
