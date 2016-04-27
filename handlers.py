@@ -235,12 +235,12 @@ class ESXi6Handler(websockify.ProxyRequestHandler):
             raise Exception("Bad Response, %s, %s" % (status, headers))
         self.do_proxy(tsock)
 
-    def recv_target(self, sock):
+    def recv_data_frames(self, sock, partial):
         """
         Receive and decode WebSocket frames.
 
         Returns:
-            (bufs_list, closed_string)
+            (complete_frames, closed_string)
         """
         closed = False
         complete_frames = ''
@@ -248,38 +248,43 @@ class ESXi6Handler(websockify.ProxyRequestHandler):
         buf = sock.recv(self.buffer_size)
         if len(buf) == 0:
             closed = {'code': 1000, 'reason': "Target closed abruptly"}
-            return bufs, closed
+            return complete_frames, partial, closed
 
-        if self.target_partial_frames:
+        if partial:
             # Add partially received frames to current read buffer
-            buf = self.target_partial_frames + buf
-            self.target_partial_frames = None
+            buf = partial + buf
+            partial = None
 
         while buf:
+            skip_pass = False
             frame = self.decode_hybi(buf, base64=self.base64,
-                                     logger=self.logger,
-                                     strict=self.strict_mode)
-            #self.msg("Received buf: %s, frame: %s", repr(buf), frame)
+                                     logger=self.logger, strict=False)
+            # self.msg("Received buf: %s, frame: %s", repr(buf), frame)
 
             if frame['payload'] is None:
                 # Incomplete/partial frame
                 if frame['left'] > 0:
-                    self.target_partial = buf[-frame['left']:]
+                    partial = buf[-frame['left']:]
                 break
             else:
-                if frame['opcode'] == 0x8: # connection close
-                    closed = {'code': frame['close_code'],
-                              'reason': frame['close_reason']}
-                    break
+                if frame['opcode'] == 0x9: # ping
+                    skip_pass = True
+                elif frame['opcode'] == 0xA: # pong
+                    skip_pass = True
 
             if frame['left']:
+                if not skip_pass:
+                    complete_frames += buf[:-frame['left']]
                 buf = buf[-frame['left']:]
-                complete_frames += buf[:-frame['left']]
             else:
+                if not skip_pass:
+                    complete_frames += buf
                 buf = ''
-                complete_frames += buf
+        return complete_frames, partial, closed
 
-        return complete_frames, closed
+    def recv_data_plain(self, sock, partial):
+        buf = sock.recv(self.buffer_size)
+        return buf, partial, len(buf) == 0
 
     def do_proxy(self, target):
         """
@@ -290,11 +295,12 @@ class ESXi6Handler(websockify.ProxyRequestHandler):
           target: the websockify WebSocketServer socket of the target
             server
         """
-        cqueue = []
-        tqueue = []
+        cqueue = ''
+        tqueue = ''
         rlist = [self.request, target]
 
-        self.target_partial_frames = None
+        cpartial = None
+        tpartial = None
 
         #Disable Nagle's Algorithm for better responsiveness
         self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -303,12 +309,14 @@ class ESXi6Handler(websockify.ProxyRequestHandler):
         if self.server.heartbeat:
             now = time.time()
             self.heartbeat = now + self.server.heartbeat
+            self.log_message("Using recv_data_frames")
+            recv_data = self.recv_data_frames
         else:
             self.heartbeat = None
+            self.log_message("Using recv_data_plain")
+            recv_data = self.recv_data_plain
 
         while True:
-            wlist = []
-
             if self.heartbeat is not None:
                 now = time.time()
                 if now > self.heartbeat:
@@ -319,7 +327,9 @@ class ESXi6Handler(websockify.ProxyRequestHandler):
                     #TODO: Fix pings to make sure they are not
                     # in data.
                     # self.send_ping()
+                    cqueue += self.encode_hybi('', opcode=0x09, base64=False)[0]
 
+            wlist = []
             if tqueue:
                 wlist.append(target)
             if cqueue:
@@ -344,50 +354,39 @@ class ESXi6Handler(websockify.ProxyRequestHandler):
 
             if self.request in outs:
                 # Send queued target data to the client
-                dat = ''.join(cqueue)
-                cqueue = []
-                sent = self.request.send(dat)
-                if sent != len(dat):
+                sent = self.request.send(cqueue)
+                if sent != len(cqueue):
                     # requeue the remaining data
-                    cqueue.insert(0, dat[sent:])
+                    cqueue = dat[sent:]
+                else:
+                    cqueue = ''
 
             if self.request in ins:
                 # Receive client data, decode it, and queue for target
-                buf = self.request.recv(self.buffer_size)
-
-                if len(buf) == 0:
+                buf, cpartial, closed = recv_data(self.request, cpartial)
+                if closed:
                     if self.verbose:
                         self.log_message("%s:%s: Client closed connection",
                                          self.server.target_host,
                                          self.server.target_port)
                     raise self.CClose(1000, "Client closed")
-
-                else:
-                    #Don't forward pong packets
-                    frame = self.decode_hybi(
-                        buf, base64=self.base64, logger=self.logger,
-                        strict=self.strict_mode)
-                    #ignore pongs with no payload
-                    if not (frame['opcode'] == 0xA and not frame['payload']):
-                        tqueue.append(buf)
-
+                tqueue += buf
 
             if target in outs:
                 # Send queued client data to the target
-                dat = ''.join(tqueue)
-                tqueue = []
-                sent = target.send(dat)
-                if sent != len(dat):
-                    tqueue.insert(0, dat[sent:])
+                sent = target.send(tqueue)
+                if sent != len(tqueue):
+                    tqueue = tqueue[sent:]
+                else:
+                    tqueue = ''
 
             if target in ins:
                 # Receive target data, encode it and queue for client
-                #buf = target.recv(self.buffer_size)
-                buf, closed = self.recv_target(target)
+                buf, tpartial, closed = recv_data(target, tpartial)
                 if closed:
                     if self.verbose:
                         self.log_message("%s:%s: Target closed connection",
                                          self.server.target_host,
                                          self.server.target_port)
-                        raise self.CClose(closed['code'], closed['reason'])
-                cqueue.append(buf)
+                    raise self.CClose(1000, "Target closed")
+                cqueue += buf
