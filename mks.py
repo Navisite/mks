@@ -16,31 +16,12 @@
 
 import atexit
 import argparse
-import getpass
-import requests
 import ssl
 import sys
-import urllib
-import urlparse
+import tools
 import webbrowser
-
 from pyVim import connect
 from pyVmomi import vim
-
-requests.packages.urllib3.disable_warnings()
-
-try:
-    _create_unverified_https_context = ssl._create_unverified_context
-except AttributeError:
-    # Legacy Python that doesn't verify HTTPS certificates by default
-    pass
-else:
-    # Handle target environment that doesn't support HTTPS verification
-    ssl._create_default_https_context = _create_unverified_https_context
-
-def err(msg):
-    sys.stderr.write(msg + '\n')
-    sys.exit(1)
 
 def parse(url):
     p = urlparse.urlparse(url)
@@ -65,26 +46,18 @@ def parse(url):
         pwd = getpass.getpass()
     return p.username, pwd, p.hostname, port, query
 
-def vsphere_url(vm, host, args):
-    # Generates console URL for vSphere versions prior 6.0
-    ticket = vm.AcquireTicket('mks')
-    vm_host = ticket.host if ticket.host else host
-    path = '?host={0}&port={1}&ticket={2}&cfgFile={3}&thumbprint={4}'.format(
-        vm_host, ticket.port, ticket.ticket, ticket.cfgFile,
-        ticket.sslThumbprint)
-    base_url = "http://rgerganov.github.io/noVNC/5"
-    url = "{0}/vnc_auto.html?host={1}&port={2}&path={3}".format(base_url,
-                                args.mhost, args.mport, urllib.quote(path))
-    return url
+try:
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    # Legacy Python that doesn't verify HTTPS certificates by default
+    pass
+else:
+    # Handle target environment that doesn't support HTTPS verification
+    ssl._create_default_https_context = _create_unverified_https_context
 
-def vsphere6_url(vm, host):
-    # Generates console URL for vSphere 6
-    ticket = vm.AcquireTicket('webmks')
-    vm_host = ticket.host if ticket.host else host
-    path = "ticket/" + ticket.ticket
-    base_url = "https://rgerganov.github.io/noVNC/6"
-    url = "{0}/vnc_auto.html?host={1}&path={2}".format(base_url, vm_host, urllib.quote(path))
-    return url
+def err(msg):
+    sys.stderr.write(msg + '\n')
+    sys.exit(1)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -122,9 +95,9 @@ def main():
     if not vm:
         err('Cannot find the specified VM')
     if si.content.about.version.startswith("6"):
-        url = vsphere6_url(vm, host)
+        url = tools.vsphere6_url(vm, host)
     else:
-        url = vsphere_url(vm, host, args)
+        url = tools.vsphere_url(vm, host, args)
     webbrowser.open(url)
 
 if __name__ == '__main__':

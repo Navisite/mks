@@ -1,0 +1,11 @@
+# ignore editor temporary files
+# vi
+*.sw?
+\.#*
+\#*#
+# emacs
+*~
+
+# ignore .pyc and templates
+*.pyc
+
